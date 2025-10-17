@@ -22,7 +22,7 @@
      <!-- Firebase Libraries -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getFirestore, collection, addDoc, query, where, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, collection, addDoc, query, where, getDocs, doc, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyAOFDLOYDRdSZfwprsvs_ena_3X2D0BHjw",
@@ -40,6 +40,7 @@
         const studentsCollection = collection(db, "students");
         const attendanceCollection = collection(db, "attendance");
         const departmentsCollection = collection(db, "departments");
+        const teachersCollection = collection(db, "teachers");
 
         let currentStudent = null;
         let linkParams = {};
@@ -52,15 +53,12 @@
         window.addEventListener('DOMContentLoaded', () => {
             const params = new URLSearchParams(window.location.search);
             const teacherId = params.get('teacherId');
-            const lecture = params.get('lecture');
-            const date = params.get('date');
-
-            if (teacherId && lecture && date) {
-                linkParams = { teacherId, lecture, date };
-                console.log("Attendance link detected:", linkParams);
+            
+            if (teacherId) {
+                linkParams = { teacherId };
+                console.log("Teacher attendance link detected:", linkParams);
             }
 
-            // Check if student is "logged in" from local storage for persistence
             const loggedInStudent = localStorage.getItem('currentStudent');
             if (loggedInStudent) {
                 currentStudent = JSON.parse(loggedInStudent);
@@ -88,30 +86,22 @@
             loadDepartments();
         }
 
-        function showDashboard() {
+        async function showDashboard() {
             if (!currentStudent) return;
             document.getElementById('welcomeName').textContent = currentStudent.name;
             
-            // Show link info if available
-            const linkInfo = document.getElementById('link-info');
-            if (linkParams.lecture) {
-                linkInfo.textContent = `Marking attendance for Lecture: ${linkParams.lecture} (${linkParams.date})`;
-                linkInfo.classList.remove('hidden');
-            } else {
-                linkInfo.classList.add('hidden');
-            }
-
             loginView.classList.add('hidden');
             registerView.classList.add('hidden');
             dashboardView.classList.remove('hidden');
+
+            // NEW: Check attendance status on dashboard load
+            checkAttendanceStatus();
         }
 
         function logout() {
             currentStudent = null;
             localStorage.removeItem('currentStudent');
-            // Also clear link params on logout
             linkParams = {};
-            // Go back to the login screen without any URL parameters
             window.location.href = window.location.pathname;
         }
 
@@ -138,7 +128,6 @@
             const department = document.getElementById('department').value;
             const studentClass = document.getElementById('class').value;
 
-            // Check if PRN already exists
             const q = query(studentsCollection, where("prn", "==", prn));
             const querySnapshot = await getDocs(q);
             if (!querySnapshot.empty) {
@@ -170,26 +159,70 @@
         });
 
         // --- ATTENDANCE ---
-        document.getElementById('markAttendanceBtn').addEventListener('click', async () => {
-            if (!currentStudent) {
-                alert("You are not logged in.");
-                return;
-            }
+        async function checkAttendanceStatus() {
+            const statusInfo = document.getElementById('status-info');
+            const markButton = document.getElementById('markAttendanceBtn');
+
             if (!linkParams.teacherId) {
-                alert("Please use a valid attendance link provided by your teacher.");
+                statusInfo.textContent = "Please open this page using a link from your teacher.";
+                statusInfo.className = "mb-4 bg-yellow-500/30 text-yellow-100 p-3 rounded-md";
+                markButton.disabled = true;
                 return;
             }
+
+            try {
+                const teacherRef = doc(db, "teachers", linkParams.teacherId);
+                const teacherSnap = await getDoc(teacherRef);
+
+                if (teacherSnap.exists()) {
+                    const teacherData = teacherSnap.data();
+                    if (teacherData.isAcceptingAttendance) {
+                        statusInfo.textContent = `Attendance is ACTIVE for Lecture: ${teacherData.currentLecture || 'N/A'}`;
+                        statusInfo.className = "mb-4 bg-green-500/30 text-green-100 p-3 rounded-md";
+                        markButton.disabled = false;
+                    } else {
+                        statusInfo.textContent = "Attendance is not active right now. Please wait for your teacher to start the session.";
+                        statusInfo.className = "mb-4 bg-red-500/30 text-red-100 p-3 rounded-md";
+                        markButton.disabled = true;
+                    }
+                } else {
+                     statusInfo.textContent = "Invalid attendance link. Teacher not found.";
+                     statusInfo.className = "mb-4 bg-red-500/30 text-red-100 p-3 rounded-md";
+                     markButton.disabled = true;
+                }
+            } catch (error) {
+                console.error("Error checking attendance status:", error);
+                statusInfo.textContent = "Could not check attendance status. Please try again.";
+                statusInfo.className = "mb-4 bg-red-500/30 text-red-100 p-3 rounded-md";
+                markButton.disabled = true;
+            }
+        }
+
+        document.getElementById('markAttendanceBtn').addEventListener('click', async () => {
+            if (!currentStudent || !linkParams.teacherId) return;
 
             const btn = document.getElementById('markAttendanceBtn');
             btn.disabled = true;
             btn.textContent = 'Marking...';
 
             try {
+                // Final check to ensure attendance is still active
+                const teacherRef = doc(db, "teachers", linkParams.teacherId);
+                const teacherSnap = await getDoc(teacherRef);
+                
+                if (!teacherSnap.exists() || !teacherSnap.data().isAcceptingAttendance) {
+                     alert("Attendance session has just ended. Please ask your teacher to start it again.");
+                     checkAttendanceStatus(); // Re-check and update UI
+                     btn.disabled = false;
+                     btn.textContent = 'Mark My Attendance';
+                     return;
+                }
+
+                const { currentLecture, currentLectureDate } = teacherSnap.data();
+
                 const position = await new Promise((resolve, reject) => {
                     navigator.geolocation.getCurrentPosition(resolve, reject, {
-                        enableHighAccuracy: true,
-                        timeout: 10000,
-                        maximumAge: 0
+                        enableHighAccuracy: true, timeout: 10000, maximumAge: 0
                     });
                 });
 
@@ -207,12 +240,11 @@
                     location: { lat: latitude, lon: longitude },
                     locationName: locationName,
                     teacherId: linkParams.teacherId,
-                    lecture: linkParams.lecture,
-                    lectureDate: linkParams.date
+                    lecture: currentLecture,
+                    lectureDate: currentLectureDate
                 };
 
                 await addDoc(attendanceCollection, attendanceRecord);
-
                 document.getElementById('successMessage').classList.remove('hidden');
                 setTimeout(() => document.getElementById('successMessage').classList.add('hidden'), 4000);
 
@@ -225,12 +257,12 @@
             } finally {
                 btn.disabled = false;
                 btn.textContent = 'Mark My Attendance';
+                checkAttendanceStatus(); // Refresh status after attempting to mark
             }
         });
 
         async function getReverseGeocode(lat, lon) {
             try {
-                // Using a free, no-key-required reverse geocoding service
                 const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}`);
                 const data = await response.json();
                 return data.display_name || 'Location details unavailable';
@@ -295,8 +327,9 @@
              <div class="bg-white/20 backdrop-blur-lg p-8 rounded-2xl shadow-2xl text-center">
                 <h1 class="text-4xl font-bold">Welcome,</h1>
                 <h2 id="welcomeName" class="text-2xl mb-6">Student</h2>
-                <p id="link-info" class="mb-4 bg-white/20 p-2 rounded-md hidden"></p>
-                <button id="markAttendanceBtn" class="w-full bg-white text-blue-600 font-bold py-4 px-4 rounded-lg text-lg hover:bg-gray-200 disabled:opacity-50">Mark My Attendance</button>
+                <!-- NEW: Status info display -->
+                <p id="status-info" class="mb-4 p-3 rounded-md">Checking attendance status...</p>
+                <button id="markAttendanceBtn" class="w-full bg-white text-blue-600 font-bold py-4 px-4 rounded-lg text-lg hover:bg-gray-200 disabled:opacity-50" disabled>Mark My Attendance</button>
                 <div id="successMessage" class="hidden mt-4 p-3 bg-green-500 rounded-lg">Attendance marked successfully!</div>
                 <button id="logoutButton" class="mt-6 text-white/80 underline">Logout</button>
             </div>
