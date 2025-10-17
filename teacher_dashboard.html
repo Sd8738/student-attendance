@@ -6,10 +6,20 @@
     <title>Personalized Teacher Dashboard</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        /* Toggle Switch Styles */
+        .switch { position: relative; display: inline-block; width: 60px; height: 34px; }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 34px; }
+        .slider:before { position: absolute; content: ""; height: 26px; width: 26px; left: 4px; bottom: 4px; background-color: white; transition: .4s; border-radius: 50%; }
+        input:checked + .slider { background-color: #4ade80; }
+        input:focus + .slider { box-shadow: 0 0 1px #4ade80; }
+        input:checked + .slider:before { transform: translateX(26px); }
+    </style>
     <!-- Firebase Libraries -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getFirestore, collection, onSnapshot, query, where, orderBy, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, collection, onSnapshot, query, where, getDocs, doc, updateDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyAOFDLOYDRdSZfwprsvs_ena_3X2D0BHjw",
@@ -28,6 +38,7 @@
         let allTeachers = {}; 
         let attendanceChart = null;
         let currentTeacher = null;
+        let teacherListener = null; // To unsubscribe from the listener on logout
 
         const loginView = document.getElementById('loginView');
         const dashboardView = document.getElementById('dashboardView');
@@ -41,7 +52,6 @@
 
         // --- PAGE LOAD LOGIC ---
         window.addEventListener('DOMContentLoaded', () => {
-            // Pre-fetch all teachers to display names later
             onSnapshot(teachersCollection, (snapshot) => {
                 allTeachers = {};
                 snapshot.forEach((doc) => {
@@ -71,6 +81,7 @@
         }
 
         document.getElementById('logoutButton').addEventListener('click', () => {
+            if (teacherListener) teacherListener(); // Unsubscribe from the real-time listener
             localStorage.removeItem('currentTeacher');
             currentTeacher = null;
             showLogin();
@@ -97,10 +108,11 @@
 
         function loadPersonalizedData() {
             if (!currentTeacher) return;
-            // Set default date for link generation
-            document.getElementById('linkDate').valueAsDate = new Date();
+            
+            // --- NEW: Display permanent link and listen for status changes ---
+            displayPermanentLink();
+            listenToTeacherStatus();
 
-            // Fetch departments for the filter dropdown
             onSnapshot(departmentsCollection, (snapshot) => {
                 const departmentFilter = document.getElementById('departmentFilter');
                 departmentFilter.innerHTML = '<option value="all">All Departments</option>';
@@ -113,16 +125,77 @@
                 });
             });
 
-            // Fetch attendance records for this specific teacher
-            const q = query(attendanceCollection, where("teacherId", "==", currentTeacher.id), orderBy("timestamp", "desc"));
+            const q = query(attendanceCollection, where("teacherId", "==", currentTeacher.id));
             onSnapshot(q, (querySnapshot) => {
                 allAttendanceRecords = [];
                 querySnapshot.forEach((doc) => {
                     allAttendanceRecords.push({ id: doc.id, ...doc.data() });
                 });
+                allAttendanceRecords.sort((a, b) => b.timestamp.toDate() - a.timestamp.toDate());
                 filterRecords();
             });
         }
+
+        // --- NEW: ATTENDANCE CONTROL LOGIC ---
+        function displayPermanentLink() {
+            const relativeURL = 'index.html';
+            const params = new URLSearchParams({ teacherId: currentTeacher.id });
+            const currentPath = window.location.href;
+            const basePath = currentPath.substring(0, currentPath.lastIndexOf('/') + 1);
+            const fullURL = `${basePath}${relativeURL}?${params.toString()}`;
+
+            document.getElementById('permanentLink').value = fullURL;
+        }
+
+        function listenToTeacherStatus() {
+            const teacherRef = doc(db, "teachers", currentTeacher.id);
+            teacherListener = onSnapshot(teacherRef, (docSnap) => {
+                if (docSnap.exists()) {
+                    const teacherData = docSnap.data();
+                    const toggle = document.getElementById('attendanceToggle');
+                    const lectureInput = document.getElementById('currentLecture');
+                    const dateInput = document.getElementById('currentDate');
+
+                    toggle.checked = teacherData.isAcceptingAttendance || false;
+                    lectureInput.value = teacherData.currentLecture || '';
+                    dateInput.value = teacherData.currentLectureDate || new Date().toISOString().split('T')[0];
+
+                    // Disable inputs if attendance is active
+                    lectureInput.disabled = toggle.checked;
+                    dateInput.disabled = toggle.checked;
+                }
+            });
+        }
+
+        document.getElementById('attendanceToggle').addEventListener('change', async (e) => {
+            const isStarting = e.target.checked;
+            const lecture = document.getElementById('currentLecture').value;
+            const date = document.getElementById('currentDate').value;
+            
+            if (isStarting && (!lecture || !date)) {
+                alert("Please provide a lecture number/name and date before starting attendance.");
+                e.target.checked = false; // Revert the toggle
+                return;
+            }
+
+            const teacherRef = doc(db, "teachers", currentTeacher.id);
+            await updateDoc(teacherRef, {
+                isAcceptingAttendance: isStarting,
+                currentLecture: lecture,
+                currentLectureDate: date
+            });
+        });
+
+        document.getElementById('copyLinkButton').addEventListener('click', () => {
+            const linkInput = document.getElementById('permanentLink');
+            linkInput.select();
+            document.execCommand('copy');
+            const copyBtn = document.getElementById('copyLinkButton');
+            copyBtn.textContent = 'Copied!';
+            setTimeout(() => { copyBtn.textContent = 'Copy'; }, 2000);
+        });
+        
+        // --- EXISTING DASHBOARD FUNCTIONS (renderAttendance, showDetails, etc.) ---
         
         function renderAttendance(records) {
             const attendanceList = document.getElementById('attendanceList');
@@ -204,7 +277,7 @@
             const selectedDepartment = document.getElementById('departmentFilter').value;
             const selectedClass = document.getElementById('classFilter').value;
             
-            let filteredRecords = allAttendanceRecords; // Already filtered by teacher
+            let filteredRecords = allAttendanceRecords;
 
             if (selectedDivision !== 'all') {
                 filteredRecords = filteredRecords.filter(r => r.division === selectedDivision);
@@ -221,7 +294,6 @@
         
         window.filterRecords = filterRecords;
 
-        // --- EXPORT TO CSV FUNCTIONALITY ---
         const exportButton = document.getElementById('exportButton');
         exportButton.addEventListener('click', () => {
             const selectedDivision = document.getElementById('divisionFilter').value;
@@ -230,15 +302,9 @@
             
             let recordsToExport = allAttendanceRecords;
 
-            if (selectedDivision !== 'all') {
-                recordsToExport = recordsToExport.filter(r => r.division === selectedDivision);
-            }
-            if (selectedDepartment !== 'all') {
-                recordsToExport = recordsToExport.filter(r => r.department === selectedDepartment);
-            }
-            if (selectedClass !== 'all') {
-                recordsToExport = recordsToExport.filter(r => r.class === selectedClass);
-            }
+            if (selectedDivision !== 'all') recordsToExport = recordsToExport.filter(r => r.division === selectedDivision);
+            if (selectedDepartment !== 'all') recordsToExport = recordsToExport.filter(r => r.department === selectedDepartment);
+            if (selectedClass !== 'all') recordsToExport = recordsToExport.filter(r => r.class === selectedClass);
 
             if (recordsToExport.length === 0) {
                 alert("No data to export for the current selection.");
@@ -248,20 +314,12 @@
             const headers = ["Student Name", "PRN", "Department", "Class", "Division", "Marked Date", "Marked Time", "Lecture Number", "Lecture Date", "Location"];
             const rows = recordsToExport.map(record => {
                 const timestamp = record.timestamp.toDate();
-                const date = timestamp.toLocaleDateString();
-                const time = timestamp.toLocaleTimeString();
                 const sanitize = (str) => `"${(str || '').toString().replace(/"/g, '""')}"`;
 
                 return [
-                    sanitize(record.studentName),
-                    sanitize(record.prn),
-                    sanitize(record.department),
-                    sanitize(record.class),
-                    sanitize(record.division),
-                    sanitize(date),
-                    sanitize(time),
-                    sanitize(record.lecture),
-                    sanitize(record.lectureDate),
+                    sanitize(record.studentName), sanitize(record.prn), sanitize(record.department),
+                    sanitize(record.class), sanitize(record.division), timestamp.toLocaleDateString(),
+                    timestamp.toLocaleTimeString(), sanitize(record.lecture), sanitize(record.lectureDate),
                     sanitize(record.locationName)
                 ].join(',');
             });
@@ -269,52 +327,14 @@
             const csvContent = [headers.join(','), ...rows].join('\n');
             const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
             const link = document.createElement("a");
-            if (link.download !== undefined) { 
-                const url = URL.createObjectURL(blob);
-                const filename = `attendance_${currentTeacher.name.replace(' ','_')}_${new Date().toISOString().split('T')[0]}.csv`;
-                link.setAttribute("href", url);
-                link.setAttribute("download", filename);
-                link.style.visibility = 'hidden';
-                document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
-            }
-        });
-
-        // --- LINK GENERATION LOGIC ---
-        const generateLinkButton = document.getElementById('generateLinkButton');
-        const generatedLinkInput = document.getElementById('generatedLink');
-        const copyLinkButton = document.getElementById('copyLinkButton');
-
-        generateLinkButton.addEventListener('click', () => {
-            if (!currentTeacher) {
-                alert('An error occurred. Please refresh and log in again.');
-                return;
-            }
-            const lecture = document.getElementById('linkLecture').value;
-            const date = document.getElementById('linkDate').value;
-
-            if (!lecture || !date) {
-                alert('Please enter a lecture number and pick a date.');
-                return;
-            }
-
-            const relativeURL = 'index.html'; 
-            const params = new URLSearchParams({ teacherId: currentTeacher.id, lecture, date });
-            
-            const currentPath = window.location.href;
-            const basePath = currentPath.substring(0, currentPath.lastIndexOf('/') + 1);
-            const fullURL = `${basePath}${relativeURL}?${params.toString()}`;
-
-            generatedLinkInput.value = fullURL;
-            document.getElementById('linkDisplay').classList.remove('hidden');
-        });
-
-        copyLinkButton.addEventListener('click', () => {
-            generatedLinkInput.select();
-            document.execCommand('copy');
-            copyLinkButton.textContent = 'Copied!';
-            setTimeout(() => { copyLinkButton.textContent = 'Copy'; }, 2000);
+            const url = URL.createObjectURL(blob);
+            const filename = `attendance_${currentTeacher.name.replace(' ','_')}_${new Date().toISOString().split('T')[0]}.csv`;
+            link.setAttribute("href", url);
+            link.setAttribute("download", filename);
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
         });
 
     </script>
@@ -409,24 +429,31 @@
         </div>
 
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mt-8">
+            <!-- NEW: Attendance Control Panel -->
             <div class="bg-white rounded-2xl shadow-lg p-6">
-                <h2 class="text-2xl font-bold text-gray-800 mb-4 border-b pb-2">Generate Attendance Link</h2>
-                 <div class="space-y-4">
+                <h2 class="text-2xl font-bold text-gray-800 mb-4 border-b pb-2">Attendance Control</h2>
+                <div class="space-y-4">
                     <div>
-                        <label for="linkLecture" class="block text-sm font-medium text-gray-700">Lecture Number/Name</label>
-                        <input type="text" id="linkLecture" placeholder="e.g., 1, 2, Practical 3" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-orange-500 focus:border-orange-500">
+                        <label class="block text-sm font-medium text-gray-700">Your Permanent Link</label>
+                        <div class="flex">
+                            <input type="text" id="permanentLink" readonly class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-l-md bg-gray-100">
+                            <button id="copyLinkButton" class="bg-gray-500 text-white font-bold py-2 px-4 rounded-r-lg hover:bg-gray-600">Copy</button>
+                        </div>
                     </div>
-                     <div>
-                        <label for="linkDate" class="block text-sm font-medium text-gray-700">Lecture Date</label>
-                        <input type="date" id="linkDate" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-orange-500 focus:border-orange-500">
+                    <div class="border-t pt-4">
+                        <label for="currentLecture" class="block text-sm font-medium text-gray-700">Set Current Lecture Number/Name</label>
+                        <input type="text" id="currentLecture" placeholder="e.g., 1, 2, Practical 3" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-orange-500 focus:border-orange-500 disabled:bg-gray-200">
                     </div>
-                    <button id="generateLinkButton" class="w-full bg-gray-700 text-white font-bold py-2 px-4 rounded-lg hover:bg-gray-800">Generate Link</button>
-                    <div id="linkDisplay" class="hidden mt-4">
-                         <label class="block text-sm font-medium text-gray-700">Share this link with students:</label>
-                         <div class="flex">
-                             <input type="text" id="generatedLink" readonly class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-l-md bg-gray-100">
-                             <button id="copyLinkButton" class="bg-gray-500 text-white font-bold py-2 px-4 rounded-r-lg hover:bg-gray-600">Copy</button>
-                         </div>
+                    <div>
+                        <label for="currentDate" class="block text-sm font-medium text-gray-700">Set Current Lecture Date</label>
+                        <input type="date" id="currentDate" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-orange-500 focus:border-orange-500 disabled:bg-gray-200">
+                    </div>
+                    <div class="flex items-center justify-between pt-2">
+                        <span class="text-lg font-semibold text-gray-700">Accepting Attendance</span>
+                        <label class="switch">
+                            <input type="checkbox" id="attendanceToggle">
+                            <span class="slider"></span>
+                        </label>
                     </div>
                 </div>
             </div>
