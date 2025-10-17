@@ -93,8 +93,6 @@
             loginView.classList.add('hidden');
             registerView.classList.add('hidden');
             dashboardView.classList.remove('hidden');
-
-            // NEW: Check attendance status on dashboard load
             checkAttendanceStatus();
         }
 
@@ -128,11 +126,12 @@
             const department = document.getElementById('department').value;
             const studentClass = document.getElementById('class').value;
 
+            // NEW: Check if PRN already exists
             const q = query(studentsCollection, where("prn", "==", prn));
             const querySnapshot = await getDocs(q);
             if (!querySnapshot.empty) {
-                alert('A student with this PRN already exists.');
-                return;
+                alert('A student with this PRN is already registered. Please login.');
+                return; // Stop the registration process
             }
 
             await addDoc(studentsCollection, { name, prn, mobile, email, division, department, class: studentClass });
@@ -206,13 +205,12 @@
             btn.textContent = 'Marking...';
 
             try {
-                // Final check to ensure attendance is still active
                 const teacherRef = doc(db, "teachers", linkParams.teacherId);
                 const teacherSnap = await getDoc(teacherRef);
                 
                 if (!teacherSnap.exists() || !teacherSnap.data().isAcceptingAttendance) {
                      alert("Attendance session has just ended. Please ask your teacher to start it again.");
-                     checkAttendanceStatus(); // Re-check and update UI
+                     checkAttendanceStatus();
                      btn.disabled = false;
                      btn.textContent = 'Mark My Attendance';
                      return;
@@ -257,7 +255,7 @@
             } finally {
                 btn.disabled = false;
                 btn.textContent = 'Mark My Attendance';
-                checkAttendanceStatus(); // Refresh status after attempting to mark
+                checkAttendanceStatus();
             }
         });
 
@@ -327,7 +325,6 @@
              <div class="bg-white/20 backdrop-blur-lg p-8 rounded-2xl shadow-2xl text-center">
                 <h1 class="text-4xl font-bold">Welcome,</h1>
                 <h2 id="welcomeName" class="text-2xl mb-6">Student</h2>
-                <!-- NEW: Status info display -->
                 <p id="status-info" class="mb-4 p-3 rounded-md">Checking attendance status...</p>
                 <button id="markAttendanceBtn" class="w-full bg-white text-blue-600 font-bold py-4 px-4 rounded-lg text-lg hover:bg-gray-200 disabled:opacity-50" disabled>Mark My Attendance</button>
                 <div id="successMessage" class="hidden mt-4 p-3 bg-green-500 rounded-lg">Attendance marked successfully!</div>
