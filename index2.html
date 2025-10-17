@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HOD Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Firebase Libraries -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getFirestore, collection, onSnapshot, query, addDoc, deleteDoc, doc, orderBy } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyAOFDLOYDRdSZfwprsvs_ena_3X2D0BHjw",
+            authDomain: "student-management-syste-27e33.firebaseapp.com",
+            projectId: "student-management-syste-27e33",
+            storageBucket: "student-management-syste-27e33.appspot.com",
+            messagingSenderId: "536854876751",
+            appId: "1:536854876751:web:adf88ef74dfc76cea903a",
+            measurementId: "G-FKZJL4HLZZ"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+
+        let allAttendanceRecords = [];
+        let allTeachers = {};
+        let attendanceChart = null;
+
+        // --- COLLECTIONS ---
+        const teachersCollection = collection(db, "teachers");
+        const departmentsCollection = collection(db, "departments");
+        const attendanceCollection = collection(db, "attendance");
+
+        // --- DYNAMICALLY LOAD AND MANAGE DEPARTMENTS ---
+        onSnapshot(departmentsCollection, (snapshot) => {
+            const departmentFilter = document.getElementById('departmentFilter');
+            const departmentList = document.getElementById('departmentList');
+            const existingOptions = Array.from(departmentFilter.options).slice(0, 1);
+            departmentFilter.innerHTML = '';
+            existingOptions.forEach(option => departmentFilter.add(option));
+            departmentList.innerHTML = '';
+
+            if (snapshot.empty) {
+                departmentList.innerHTML = '<p class="text-gray-500">No departments added yet.</p>';
+            }
+            snapshot.forEach((doc) => {
+                const department = { id: doc.id, ...doc.data() };
+                const option = document.createElement('option');
+                option.value = department.name;
+                option.textContent = department.name;
+                departmentFilter.appendChild(option);
+
+                const div = document.createElement('div');
+                div.className = 'flex justify-between items-center p-2 bg-gray-50 rounded';
+                div.innerHTML = `<span>${department.name}</span> <button class="text-red-500 hover:text-red-700 font-semibold" onclick="deleteDepartment('${doc.id}')">Delete</button>`;
+                departmentList.appendChild(div);
+            });
+        });
+
+        window.deleteDepartment = async function(id) {
+            if (confirm('Are you sure you want to delete this department?')) {
+                await deleteDoc(doc(db, "departments", id));
+            }
+        }
+
+        const addDepartmentForm = document.getElementById('addDepartmentForm');
+        addDepartmentForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const departmentName = document.getElementById('departmentName').value;
+            const messageDiv = document.getElementById('departmentFormMessage');
+            try {
+                await addDoc(departmentsCollection, { name: departmentName });
+                messageDiv.textContent = 'Department added successfully!';
+                messageDiv.className = 'mt-2 text-green-600';
+                addDepartmentForm.reset();
+            } catch (error) {
+                messageDiv.textContent = 'Error adding department.';
+                messageDiv.className = 'mt-2 text-red-600';
+            }
+            setTimeout(() => messageDiv.textContent = '', 3000);
+        });
+
+
+        // --- DYNAMICALLY LOAD AND MANAGE TEACHERS ---
+        onSnapshot(teachersCollection, (snapshot) => {
+            const teacherFilter = document.getElementById('teacherFilter');
+            const teacherList = document.getElementById('teacherList');
+            
+            // Preserve "All Teachers" option
+            const existingFilterOptions = Array.from(teacherFilter.options).slice(0, 1);
+            teacherFilter.innerHTML = '';
+            existingFilterOptions.forEach(option => teacherFilter.add(option));
+            
+            teacherList.innerHTML = '';
+            allTeachers = {};
+
+            if(snapshot.empty){
+                teacherList.innerHTML = '<p class="text-gray-500">No teachers added yet.</p>';
+            }
+
+            snapshot.forEach((doc) => {
+                const teacher = { id: doc.id, ...doc.data()};
+                allTeachers[doc.id] = teacher;
+
+                // Add to main filter
+                const filterOption = document.createElement('option');
+                filterOption.value = doc.id;
+                filterOption.textContent = `${teacher.name} (${teacher.subject})`;
+                teacherFilter.appendChild(filterOption);
+
+                // Add to management list
+                const teacherDiv = document.createElement('div');
+                teacherDiv.className = 'flex justify-between items-center p-2 bg-gray-50 rounded';
+                teacherDiv.innerHTML = `
+                    <span>${teacher.name} (${teacher.subject}) - <strong>Div: ${teacher.division || 'N/A'}</strong></span>
+                    <button class="text-red-500 hover:text-red-700 font-semibold" onclick="deleteTeacher('${doc.id}')">Delete</button>
+                `;
+                teacherList.appendChild(teacherDiv);
+            });
+        });
+        
+        window.deleteTeacher = async function(teacherId) {
+            if (confirm('Are you sure you want to delete this teacher? This action cannot be undone.')) {
+                await deleteDoc(doc(db, "teachers", teacherId));
+            }
+        }
+
+        // --- ADD NEW TEACHER ---
+        const addTeacherForm = document.getElementById('addTeacherForm');
+        addTeacherForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const teacherName = document.getElementById('teacherName').value;
+            const teacherSubject = document.getElementById('teacherSubject').value;
+            const teacherDivision = document.getElementById('teacherDivision').value;
+            const messageDiv = document.getElementById('formMessage');
+            
+            try {
+                await addDoc(teachersCollection, {
+                    name: teacherName,
+                    subject: teacherSubject,
+                    division: teacherDivision
+                });
+                messageDiv.textContent = 'Teacher added successfully!';
+                messageDiv.className = 'mt-2 text-green-600';
+                addTeacherForm.reset();
+            } catch (error) {
+                messageDiv.textContent = 'Error adding teacher.';
+                messageDiv.className = 'mt-2 text-red-600';
+            }
+            setTimeout(() => messageDiv.textContent = '', 3000);
+        });
+
+        function renderAttendance(records) {
+            const attendanceList = document.getElementById('attendanceList');
+            const placeholder = document.getElementById('detailsPlaceholder');
+            const studentDetails = document.getElementById('studentDetails');
+            attendanceList.innerHTML = '';
+
+            if (records.length === 0) {
+                attendanceList.innerHTML = '<p class="text-gray-500">No attendance records match the current filter.</p>';
+                placeholder.classList.remove('hidden');
+                studentDetails.classList.add('hidden');
+                return;
+            }
+
+            records.forEach(record => {
+                const recordDiv = document.createElement('div');
+                recordDiv.className = 'p-3 mb-2 bg-gray-50 rounded-lg cursor-pointer hover:bg-orange-100 border border-gray-200';
+                recordDiv.innerHTML = `<h4 class="font-semibold text-gray-800">${record.studentName}</h4><p class="text-sm text-gray-500">Div: ${record.division} | ${new Date(record.timestamp.toDate()).toLocaleString()}</p>`;
+                recordDiv.onclick = () => showDetails(record.id);
+                attendanceList.appendChild(recordDiv);
+            });
+        }
+
+        window.showDetails = function(recordId) {
+            const record = allAttendanceRecords.find(r => r.id === recordId);
+            if (!record) return;
+            
+            document.getElementById('detailName').innerText = record.studentName;
+            document.getElementById('detailPrn').innerText = record.prn || 'N/A';
+            document.getElementById('detailDepartment').innerText = record.department || 'N/A';
+            document.getElementById('detailClass').innerText = record.class || 'N/A';
+            document.getElementById('detailLecture').innerText = record.lecture || 'N/A';
+            document.getElementById('detailLectureDate').innerText = record.lectureDate || 'N/A';
+            document.getElementById('detailTime').innerText = new Date(record.timestamp.toDate()).toLocaleString();
+            document.getElementById('detailLocation').innerHTML = `<a href="https://www.google.com/maps?q=${record.location.lat},${record.location.lon}" target="_blank" class="text-orange-500 hover:underline">${record.locationName || 'View on Map'}</a>`;
+            document.getElementById('detailDivision').innerText = record.division;
+
+            const teacher = allTeachers[record.teacherId];
+            document.getElementById('detailTeacher').innerText = teacher ? `${teacher.name} (${teacher.subject})` : 'Unknown';
+
+            document.getElementById('detailsPlaceholder').classList.add('hidden');
+            document.getElementById('studentDetails').classList.remove('hidden');
+        }
+
+        function updateAnalytics(records) {
+            const ctx = document.getElementById('attendanceChart').getContext('2d');
+            const attendanceByDay = {};
+
+            records.forEach(record => {
+                const date = new Date(record.timestamp.toDate()).toLocaleDateString();
+                attendanceByDay[date] = (attendanceByDay[date] || 0) + 1;
+            });
+
+            const labels = Object.keys(attendanceByDay).sort((a,b) => new Date(a.split('/').reverse().join('-')) - new Date(b.split('/').reverse().join('-')));
+            const data = labels.map(label => attendanceByDay[label]);
+
+            if(attendanceChart) {
+                attendanceChart.destroy();
+            }
+
+            attendanceChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Students Present',
+                        data: data,
+                        backgroundColor: 'rgba(249, 115, 22, 0.6)',
+                        borderColor: 'rgba(249, 115, 22, 1)',
+                        borderWidth: 1
+                    }]
+                },
+                options: { scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } } }
+            });
+        }
+
+        function filterRecords() {
+            const selectedTeacher = document.getElementById('teacherFilter').value;
+            const selectedDivision = document.getElementById('divisionFilter').value;
+            const selectedDepartment = document.getElementById('departmentFilter').value;
+            const selectedClass = document.getElementById('classFilter').value;
+            
+            let filteredRecords = allAttendanceRecords;
+
+            if (selectedTeacher !== 'all') {
+                filteredRecords = filteredRecords.filter(r => r.teacherId === selectedTeacher);
+            }
+            if (selectedDivision !== 'all') {
+                filteredRecords = filteredRecords.filter(r => r.division === selectedDivision);
+            }
+            if (selectedDepartment !== 'all') {
+                filteredRecords = filteredRecords.filter(r => r.department === selectedDepartment);
+            }
+            if (selectedClass !== 'all') {
+                filteredRecords = filteredRecords.filter(r => r.class === selectedClass);
+            }
+            renderAttendance(filteredRecords);
+            updateAnalytics(filteredRecords);
+        }
+        
+        window.filterRecords = filterRecords;
+
+        const exportButton = document.getElementById('exportButton');
+        exportButton.addEventListener('click', () => {
+             const selectedTeacher = document.getElementById('teacherFilter').value;
+            const selectedDivision = document.getElementById('divisionFilter').value;
+            const selectedDepartment = document.getElementById('departmentFilter').value;
+            const selectedClass = document.getElementById('classFilter').value;
+            
+            let recordsToExport = allAttendanceRecords;
+
+            if (selectedTeacher !== 'all') {
+                recordsToExport = recordsToExport.filter(r => r.teacherId === selectedTeacher);
+            }
+            if (selectedDivision !== 'all') {
+                recordsToExport = recordsToExport.filter(r => r.division === selectedDivision);
+            }
+            if (selectedDepartment !== 'all') {
+                recordsToExport = recordsToExport.filter(r => r.department === selectedDepartment);
+            }
+            if (selectedClass !== 'all') {
+                recordsToExport = recordsToExport.filter(r => r.class === selectedClass);
+            }
+
+            if (recordsToExport.length === 0) {
+                alert("No data to export for the current selection.");
+                return;
+            }
+
+            const headers = [
+                "Student Name", "PRN", "Department", "Class", "Division", 
+                "Marked Date", "Marked Time", "Lecture Number", "Lecture Date", "Location", "Teacher", "Subject"
+            ];
+
+            const rows = recordsToExport.map(record => {
+                const timestamp = record.timestamp.toDate();
+                const date = timestamp.toLocaleDateString();
+                const time = timestamp.toLocaleTimeString();
+                const teacher = allTeachers[record.teacherId] || { name: 'Unknown', subject: 'Unknown' };
+                const sanitize = (str) => `"${(str || '').toString().replace(/"/g, '""')}"`;
+
+                return [
+                    sanitize(record.studentName),
+                    sanitize(record.prn),
+                    sanitize(record.department),
+                    sanitize(record.class),
+                    sanitize(record.division),
+                    sanitize(date),
+                    sanitize(time),
+                    sanitize(record.lecture),
+                    sanitize(record.lectureDate),
+                    sanitize(record.locationName),
+                    sanitize(teacher.name),
+                    sanitize(teacher.subject)
+                ].join(',');
+            });
+
+            const csvContent = [headers.join(','), ...rows].join('\n');
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement("a");
+            if (link.download !== undefined) { 
+                const url = URL.createObjectURL(blob);
+                const filename = `attendance_export_${new Date().toISOString().split('T')[0]}.csv`;
+                link.setAttribute("href", url);
+                link.setAttribute("download", filename);
+                link.style.visibility = 'hidden';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            }
+        });
+
+        const q = query(collection(db, "attendance"), orderBy("timestamp", "desc"));
+        onSnapshot(q, (querySnapshot) => {
+            allAttendanceRecords = [];
+            querySnapshot.forEach((doc) => {
+                allAttendanceRecords.push({ id: doc.id, ...doc.data() });
+            });
+            filterRecords();
+        });
+
+    </script>
+</head>
+<body class="bg-gray-100 font-sans">
+    <div class="container mx-auto p-4 md:p-8">
+        <h1 class="text-4xl font-bold text-gray-800 mb-2">HOD Dashboard</h1>
+        <p class="text-lg text-gray-600 mb-6">Real-time Student Attendance Monitoring</p>
+        
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+            <div>
+                <label for="teacherFilter" class="block text-sm font-medium text-gray-700 mb-1">Filter by Teacher:</label>
+                <select id="teacherFilter" onchange="filterRecords()" class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500">
+                    <option value="all">All Teachers</option>
+                </select>
+            </div>
+             <div>
+                <label for="divisionFilter" class="block text-sm font-medium text-gray-700 mb-1">Filter by Division:</label>
+                <select id="divisionFilter" onchange="filterRecords()" class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500">
+                    <option value="all">All Divisions</option>
+                    <option value="A">Division A</option>
+                    <option value="B">Division B</option>
+                    <option value="C">Division C</option>
+                </select>
+            </div>
+            <div>
+                <label for="departmentFilter" class="block text-sm font-medium text-gray-700 mb-1">Filter by Department:</label>
+                <select id="departmentFilter" onchange="filterRecords()" class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500">
+                    <option value="all">All Departments</option>
+                </select>
+            </div>
+             <div>
+                <label for="classFilter" class="block text-sm font-medium text-gray-700 mb-1">Filter by Class:</label>
+                <select id="classFilter" onchange="filterRecords()" class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500">
+                    <option value="all">All Classes</option>
+                    <option value="FY BTech">FY BTech</option>
+                    <option value="SY BTech">SY BTech</option>
+                    <option value="TY BTech">TY BTech</option>
+                    <option value="BTech">BTech</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="flex justify-end mb-6">
+            <button id="exportButton" class="bg-green-600 text-white font-bold py-2 px-6 rounded-lg hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-800 transition duration-300">
+                Export Filtered to CSV
+            </button>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+            <div class="md:col-span-1 bg-white rounded-2xl shadow-lg p-6">
+                <h2 class="text-2xl font-bold text-gray-800 mb-4 border-b pb-2">Attendance Log</h2>
+                <div id="attendanceList" class="max-h-96 overflow-y-auto">
+                    <p class="text-gray-500">Loading records...</p>
+                </div>
+            </div>
+
+            <div class="md:col-span-2 bg-white rounded-2xl shadow-lg p-6">
+                 <h2 class="text-2xl font-bold text-gray-800 mb-4 border-b pb-2">Attendance Details</h2>
+                 <div id="detailsPlaceholder" class="text-center py-12">
+                     <p class="text-gray-500">Select a record from the log to see details.</p>
+                 </div>
+                 <div id="studentDetails" class="hidden grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div class="space-y-3">
+                         <p><strong>Name:</strong> <span id="detailName"></span></p>
+                         <p><strong>PRN Number:</strong> <span id="detailPrn"></span></p>
+                         <p><strong>Department:</strong> <span id="detailDepartment"></span></p>
+                         <p><strong>Class:</strong> <span id="detailClass"></span></p>
+                         <p><strong>Marked For:</strong> <span id="detailTeacher"></span></p>
+                         <p><strong>Division:</strong> <span id="detailDivision"></span></p>
+                         <p><strong>Marked At:</strong> <span id="detailTime"></span></p>
+                         <p><strong>Location:</strong> <span id="detailLocation"></span></p>
+                         <p><strong>Lecture:</strong> <span id="detailLecture"></span></p>
+                         <p><strong>Lecture Date:</strong> <span id="detailLectureDate"></span></p>
+                    </div>
+                 </div>
+            </div>
+        </div>
+        
+        <div class="mt-8 bg-white rounded-2xl shadow-lg p-6">
+            <h2 class="text-2xl font-bold text-gray-800 mb-4 border-b pb-2">Manage College Data</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                <div>
+                    <h3 class="text-lg font-semibold mb-2">Manage Teachers</h3>
+                    <form id="addTeacherForm" class="space-y-4 mb-4">
+                        <div>
+                            <label for="teacherName" class="block text-sm font-medium text-gray-700">Teacher Name</label>
+                            <input type="text" id="teacherName" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-orange-500 focus:border-orange-500">
+                        </div>
+                        <div>
+                            <label for="teacherSubject" class="block text-sm font-medium text-gray-700">Subject</label>
+                            <input type="text" id="teacherSubject" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-orange-500 focus:border-orange-500">
+                        </div>
+                         <div>
+                            <label for="teacherDivision" class="block text-sm font-medium text-gray-700">Division</label>
+                            <input type="text" id="teacherDivision" placeholder="e.g., A, B, TE-COMP" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-orange-500 focus:border-orange-500">
+                        </div>
+                        <button type="submit" class="w-full bg-orange-500 text-white font-bold py-2 px-4 rounded-lg hover:bg-orange-600">Add Teacher</button>
+                        <div id="formMessage" class="mt-2 text-sm"></div>
+                    </form>
+                    <h4 class="text-md font-semibold mb-2">Current Roster</h4>
+                    <div id="teacherList" class="space-y-2 max-h-40 overflow-y-auto"></div>
+                </div>
+                <div>
+                    <h3 class="text-lg font-semibold mb-2">Manage Departments</h3>
+                     <form id="addDepartmentForm" class="space-y-4 mb-4">
+                        <div>
+                            <label for="departmentName" class="block text-sm font-medium text-gray-700">Department Name</label>
+                            <input type="text" id="departmentName" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-orange-500 focus:border-orange-500">
+                        </div>
+                        <button type="submit" class="w-full bg-blue-500 text-white font-bold py-2 px-4 rounded-lg hover:bg-blue-600">Add Department</button>
+                        <div id="departmentFormMessage" class="mt-2 text-sm"></div>
+                    </form>
+                    <h4 class="text-md font-semibold mb-2">Current Departments</h4>
+                    <div id="departmentList" class="space-y-2 max-h-40 overflow-y-auto"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="mt-8 bg-white rounded-2xl shadow-lg p-6">
+            <h2 class="text-2xl font-bold text-gray-800 mb-4 border-b pb-2">Attendance Analytics</h2>
+            <canvas id="attendanceChart"></canvas>
+        </div>
+    </div>
+</body>
+</html>
+

@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Personalized Teacher Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Firebase Libraries -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getFirestore, collection, onSnapshot, query, where, orderBy, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyAOFDLOYDRdSZfwprsvs_ena_3X2D0BHjw",
+            authDomain: "student-management-syste-27e33.firebaseapp.com",
+            projectId: "student-management-syste-27e33",
+            storageBucket: "student-management-syste-27e33.appspot.com",
+            messagingSenderId: "536854876751",
+            appId: "1:536854876751:web:adf88ef74dfc76cea903a",
+            measurementId: "G-FKZJL4HLZZ"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+
+        let allAttendanceRecords = [];
+        let allTeachers = {}; 
+        let attendanceChart = null;
+        let currentTeacher = null;
+
+        const loginView = document.getElementById('loginView');
+        const dashboardView = document.getElementById('dashboardView');
+        const loginForm = document.getElementById('teacherLoginForm');
+        const loginError = document.getElementById('login-error-message');
+
+        // --- COLLECTIONS ---
+        const teachersCollection = collection(db, "teachers");
+        const departmentsCollection = collection(db, "departments");
+        const attendanceCollection = collection(db, "attendance");
+
+        // Pre-fetch all teachers to display names later
+        onSnapshot(teachersCollection, (snapshot) => {
+            allTeachers = {};
+            snapshot.forEach((doc) => {
+                allTeachers[doc.id] = { id: doc.id, ...doc.data()};
+            });
+        });
+        
+        // --- LOGIN LOGIC ---
+        loginForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            loginError.textContent = '';
+            const name = document.getElementById('teacherName').value.trim();
+            const subject = document.getElementById('teacherSubject').value.trim();
+
+            const q = query(teachersCollection, where("name", "==", name), where("subject", "==", subject));
+            const querySnapshot = await getDocs(q);
+
+            if (querySnapshot.empty) {
+                loginError.textContent = "Invalid name or subject. Please try again.";
+            } else {
+                currentTeacher = {id: querySnapshot.docs[0].id, ...querySnapshot.docs[0].data()};
+                document.getElementById('welcomeTeacherName').innerText = currentTeacher.name;
+                loginView.classList.add('hidden');
+                dashboardView.classList.remove('hidden');
+                loadPersonalizedData();
+            }
+        });
+
+        function loadPersonalizedData() {
+            if (!currentTeacher) return;
+            // Set default date for link generation
+            document.getElementById('linkDate').valueAsDate = new Date();
+
+            // Fetch departments for the filter dropdown
+            onSnapshot(departmentsCollection, (snapshot) => {
+                const departmentFilter = document.getElementById('departmentFilter');
+                const existingOptions = Array.from(departmentFilter.options).slice(0, 1);
+                departmentFilter.innerHTML = '';
+                existingOptions.forEach(option => departmentFilter.add(option));
+                snapshot.forEach((doc) => {
+                    const department = { id: doc.id, ...doc.data() };
+                    const option = document.createElement('option');
+                    option.value = department.name;
+                    option.textContent = department.name;
+                    departmentFilter.appendChild(option);
+                });
+            });
+
+            // Fetch attendance records for this specific teacher
+            const q = query(attendanceCollection, where("teacherId", "==", currentTeacher.id), orderBy("timestamp", "desc"));
+            onSnapshot(q, (querySnapshot) => {
+                allAttendanceRecords = [];
+                querySnapshot.forEach((doc) => {
+                    allAttendanceRecords.push({ id: doc.id, ...doc.data() });
+                });
+                filterRecords();
+            });
+        }
+        
+        function renderAttendance(records) {
+            const attendanceList = document.getElementById('attendanceList');
+            const placeholder = document.getElementById('detailsPlaceholder');
+            const studentDetails = document.getElementById('studentDetails');
+            attendanceList.innerHTML = '';
+
+            if (records.length === 0) {
+                attendanceList.innerHTML = '<p class="text-gray-500">No attendance records match the current filter.</p>';
+                placeholder.classList.remove('hidden');
+                studentDetails.classList.add('hidden');
+                return;
+            }
+
+            records.forEach(record => {
+                const recordDiv = document.createElement('div');
+                recordDiv.className = 'p-3 mb-2 bg-gray-50 rounded-lg cursor-pointer hover:bg-orange-100 border border-gray-200';
+                recordDiv.innerHTML = `<h4 class="font-semibold text-gray-800">${record.studentName}</h4><p class="text-sm text-gray-500">Div: ${record.division} | ${new Date(record.timestamp.toDate()).toLocaleString()}</p>`;
+                recordDiv.onclick = () => showDetails(record.id);
+                attendanceList.appendChild(recordDiv);
+            });
+        }
+
+        window.showDetails = function(recordId) {
+            const record = allAttendanceRecords.find(r => r.id === recordId);
+            if (!record) return;
+            
+            document.getElementById('detailName').innerText = record.studentName;
+            document.getElementById('detailPrn').innerText = record.prn || 'N/A';
+            document.getElementById('detailDepartment').innerText = record.department || 'N/A';
+            document.getElementById('detailClass').innerText = record.class || 'N/A';
+            document.getElementById('detailLecture').innerText = record.lecture || 'N/A';
+            document.getElementById('detailLectureDate').innerText = record.lectureDate || 'N/A';
+            document.getElementById('detailTime').innerText = new Date(record.timestamp.toDate()).toLocaleString();
+            document.getElementById('detailLocation').innerHTML = `<a href="https://www.google.com/maps?q=${record.location.lat},${record.location.lon}" target="_blank" class="text-orange-500 hover:underline">${record.locationName || 'View on Map'}</a>`;
+            document.getElementById('detailDivision').innerText = record.division;
+            
+            const teacher = allTeachers[record.teacherId];
+            document.getElementById('detailTeacher').innerText = teacher ? `${teacher.name} (${teacher.subject})` : 'Unknown';
+
+            document.getElementById('detailsPlaceholder').classList.add('hidden');
+            document.getElementById('studentDetails').classList.remove('hidden');
+        }
+
+        function updateAnalytics(records) {
+            const ctx = document.getElementById('attendanceChart').getContext('2d');
+            const attendanceByDay = {};
+
+            records.forEach(record => {
+                const date = new Date(record.timestamp.toDate()).toLocaleDateString();
+                attendanceByDay[date] = (attendanceByDay[date] || 0) + 1;
+            });
+
+            const labels = Object.keys(attendanceByDay).sort((a,b) => new Date(a.split('/').reverse().join('-')) - new Date(b.split('/').reverse().join('-')));
+            const data = labels.map(label => attendanceByDay[label]);
+
+            if(attendanceChart) {
+                attendanceChart.destroy();
+            }
+
+            attendanceChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Students Present',
+                        data: data,
+                        backgroundColor: 'rgba(249, 115, 22, 0.6)',
+                        borderColor: 'rgba(249, 115, 22, 1)',
+                        borderWidth: 1
+                    }]
+                },
+                options: { scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } } }
+            });
+        }
+
+        function filterRecords() {
+            const selectedDivision = document.getElementById('divisionFilter').value;
+            const selectedDepartment = document.getElementById('departmentFilter').value;
+            const selectedClass = document.getElementById('classFilter').value;
+            
+            let filteredRecords = allAttendanceRecords; // Already filtered by teacher
+
+            if (selectedDivision !== 'all') {
+                filteredRecords = filteredRecords.filter(r => r.division === selectedDivision);
+            }
+            if (selectedDepartment !== 'all') {
+                filteredRecords = filteredRecords.filter(r => r.department === selectedDepartment);
+            }
+            if (selectedClass !== 'all') {
+                filteredRecords = filteredRecords.filter(r => r.class === selectedClass);
+            }
+            renderAttendance(filteredRecords);
+            updateAnalytics(filteredRecords);
+        }
+        
+        window.filterRecords = filterRecords;
+
+        // --- EXPORT TO CSV FUNCTIONALITY ---
+        const exportButton = document.getElementById('exportButton');
+        exportButton.addEventListener('click', () => {
+            const selectedDivision = document.getElementById('divisionFilter').value;
+            const selectedDepartment = document.getElementById('departmentFilter').value;
+            const selectedClass = document.getElementById('classFilter').value;
+            
+            let recordsToExport = allAttendanceRecords;
+
+            if (selectedDivision !== 'all') {
+                recordsToExport = recordsToExport.filter(r => r.division === selectedDivision);
+            }
+            if (selectedDepartment !== 'all') {
+                recordsToExport = recordsToExport.filter(r => r.department === selectedDepartment);
+            }
+            if (selectedClass !== 'all') {
+                recordsToExport = recordsToExport.filter(r => r.class === selectedClass);
+            }
+
+            if (recordsToExport.length === 0) {
+                alert("No data to export for the current selection.");
+                return;
+            }
+
+            const headers = ["Student Name", "PRN", "Department", "Class", "Division", "Marked Date", "Marked Time", "Lecture Number", "Lecture Date", "Location"];
+            const rows = recordsToExport.map(record => {
+                const timestamp = record.timestamp.toDate();
+                const date = timestamp.toLocaleDateString();
+                const time = timestamp.toLocaleTimeString();
+                const sanitize = (str) => `"${(str || '').toString().replace(/"/g, '""')}"`;
+
+                return [
+                    sanitize(record.studentName),
+                    sanitize(record.prn),
+                    sanitize(record.department),
+                    sanitize(record.class),
+                    sanitize(record.division),
+                    sanitize(date),
+                    sanitize(time),
+                    sanitize(record.lecture),
+                    sanitize(record.lectureDate),
+                    sanitize(record.locationName)
+                ].join(',');
+            });
+
+            const csvContent = [headers.join(','), ...rows].join('\n');
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement("a");
+            if (link.download !== undefined) { 
+                const url = URL.createObjectURL(blob);
+                const filename = `attendance_${currentTeacher.name.replace(' ','_')}_${new Date().toISOString().split('T')[0]}.csv`;
+                link.setAttribute("href", url);
+                link.setAttribute("download", filename);
+                link.style.visibility = 'hidden';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            }
+        });
+
+        // --- LINK GENERATION LOGIC ---
+        const generateLinkButton = document.getElementById('generateLinkButton');
+        const generatedLinkInput = document.getElementById('generatedLink');
+        const copyLinkButton = document.getElementById('copyLinkButton');
+
+        generateLinkButton.addEventListener('click', () => {
+            if (!currentTeacher) {
+                alert('An error occurred. Please refresh and log in again.');
+                return;
+            }
+            const lecture = document.getElementById('linkLecture').value;
+            const date = document.getElementById('linkDate').value;
+
+            if (!lecture || !date) {
+                alert('Please enter a lecture number and pick a date.');
+                return;
+            }
+
+            const relativeURL = 'student_app.html';
+            const params = new URLSearchParams({ teacherId: currentTeacher.id, lecture, date });
+            
+            // Manually construct the base path to ensure it works correctly even from local files
+            const currentPath = window.location.href;
+            const basePath = currentPath.substring(0, currentPath.lastIndexOf('/') + 1);
+            const fullURL = `${basePath}${relativeURL}?${params.toString()}`;
+
+            generatedLinkInput.value = fullURL;
+            document.getElementById('linkDisplay').classList.remove('hidden');
+        });
+
+        copyLinkButton.addEventListener('click', () => {
+            generatedLinkInput.select();
+            document.execCommand('copy');
+            copyLinkButton.textContent = 'Copied!';
+            setTimeout(() => { copyLinkButton.textContent = 'Copy'; }, 2000);
+        });
+
+    </script>
+</head>
+<body class="bg-gray-100 font-sans">
+
+    <!-- Login View -->
+    <div id="loginView" class="flex items-center justify-center min-h-screen p-4">
+        <div class="w-full max-w-md mx-auto p-8 bg-white rounded-2xl shadow-2xl">
+            <h1 class="text-3xl font-bold text-center text-gray-800 mb-6">Teacher Login</h1>
+            <form id="teacherLoginForm" class="space-y-4">
+                <div>
+                    <label for="teacherName" class="block text-sm font-medium text-gray-700">Your Name</label>
+                    <input type="text" id="teacherName" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-orange-500 focus:border-orange-500">
+                </div>
+                <div>
+                    <label for="teacherSubject" class="block text-sm font-medium text-gray-700">Your Subject</label>
+                    <input type="text" id="teacherSubject" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-orange-500 focus:border-orange-500">
+                </div>
+                <button type="submit" class="w-full bg-orange-500 text-white font-bold py-3 px-4 rounded-lg hover:bg-orange-600">Login</button>
+            </form>
+            <div id="login-error-message" class="mt-4 text-center text-red-600 font-semibold"></div>
+        </div>
+    </div>
+    
+    <!-- Dashboard View -->
+    <div id="dashboardView" class="hidden container mx-auto p-4 md:p-8">
+        <div class="md:flex justify-between items-center">
+            <div>
+                <h1 class="text-4xl font-bold text-gray-800 mb-2">Welcome, <span id="welcomeTeacherName"></span></h1>
+                <p class="text-lg text-gray-600 mb-6">Your Personal Attendance Dashboard</p>
+            </div>
+            <div class="mb-6 md:mb-0">
+                <button id="exportButton" class="w-full md:w-auto bg-green-600 text-white font-bold py-2 px-6 rounded-lg hover:bg-green-700">
+                    Export Filtered to CSV
+                </button>
+            </div>
+        </div>
+        
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
+             <div>
+                <label for="divisionFilter" class="block text-sm font-medium text-gray-700 mb-1">Filter by Division:</label>
+                <select id="divisionFilter" onchange="filterRecords()" class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500">
+                    <option value="all">All Divisions</option>
+                    <option value="A">Division A</option>
+                    <option value="B">Division B</option>
+                    <option value="C">Division C</option>
+                </select>
+            </div>
+            <div>
+                <label for="departmentFilter" class="block text-sm font-medium text-gray-700 mb-1">Filter by Department:</label>
+                <select id="departmentFilter" onchange="filterRecords()" class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500">
+                    <option value="all">All Departments</option>
+                </select>
+            </div>
+             <div>
+                <label for="classFilter" class="block text-sm font-medium text-gray-700 mb-1">Filter by Class:</label>
+                <select id="classFilter" onchange="filterRecords()" class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500">
+                    <option value="all">All Classes</option>
+                    <option value="FY BTech">FY BTech</option>
+                    <option value="SY BTech">SY BTech</option>
+                    <option value="TY BTech">TY BTech</option>
+                    <option value="BTech">BTech</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+            <div class="md:col-span-1 bg-white rounded-2xl shadow-lg p-6">
+                <h2 class="text-2xl font-bold text-gray-800 mb-4 border-b pb-2">Your Attendance Log</h2>
+                <div id="attendanceList" class="max-h-96 overflow-y-auto">
+                    <p class="text-gray-500">Loading records...</p>
+                </div>
+            </div>
+
+            <div class="md:col-span-2 bg-white rounded-2xl shadow-lg p-6">
+                 <h2 class="text-2xl font-bold text-gray-800 mb-4 border-b pb-2">Attendance Details</h2>
+                 <div id="detailsPlaceholder" class="text-center py-12">
+                     <p class="text-gray-500">Select a record from the log to see details.</p>
+                 </div>
+                 <div id="studentDetails" class="hidden space-y-3">
+                     <p><strong>Name:</strong> <span id="detailName"></span></p>
+                     <p><strong>PRN Number:</strong> <span id="detailPrn"></span></p>
+                     <p><strong>Department:</strong> <span id="detailDepartment"></span></p>
+                     <p><strong>Class:</strong> <span id="detailClass"></span></p>
+                     <p><strong>Marked For:</strong> <span id="detailTeacher"></span></p>
+                     <p><strong>Division:</strong> <span id="detailDivision"></span></p>
+                     <p><strong>Marked At:</strong> <span id="detailTime"></span></p>
+                     <p><strong>Location:</strong> <span id="detailLocation"></span></p>
+                     <p><strong>Lecture:</strong> <span id="detailLecture"></span></p>
+                     <p><strong>Lecture Date:</strong> <span id="detailLectureDate"></span></p>
+                 </div>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mt-8">
+            <div class="bg-white rounded-2xl shadow-lg p-6">
+                <h2 class="text-2xl font-bold text-gray-800 mb-4 border-b pb-2">Generate Attendance Link</h2>
+                 <div class="space-y-4">
+                    <div>
+                        <label for="linkLecture" class="block text-sm font-medium text-gray-700">Lecture Number/Name</label>
+                        <input type="text" id="linkLecture" placeholder="e.g., 1, 2, Practical 3" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-orange-500 focus:border-orange-500">
+                    </div>
+                     <div>
+                        <label for="linkDate" class="block text-sm font-medium text-gray-700">Lecture Date</label>
+                        <input type="date" id="linkDate" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-orange-500 focus:border-orange-500">
+                    </div>
+                    <button id="generateLinkButton" class="w-full bg-gray-700 text-white font-bold py-2 px-4 rounded-lg hover:bg-gray-800">Generate Link</button>
+                    <div id="linkDisplay" class="hidden mt-4">
+                         <label class="block text-sm font-medium text-gray-700">Share this link with students:</label>
+                         <div class="flex">
+                             <input type="text" id="generatedLink" readonly class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-l-md bg-gray-100">
+                             <button id="copyLinkButton" class="bg-gray-500 text-white font-bold py-2 px-4 rounded-r-lg hover:bg-gray-600">Copy</button>
+                         </div>
+                    </div>
+                </div>
+            </div>
+            <div class="bg-white rounded-2xl shadow-lg p-6">
+                <h2 class="text-2xl font-bold text-gray-800 mb-4 border-b pb-2">Your Attendance Analytics</h2>
+                <canvas id="attendanceChart"></canvas>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
+
