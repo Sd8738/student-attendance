@@ -16,7 +16,7 @@
             authDomain: "student-management-syste-27e33.firebaseapp.com",
             projectId: "student-management-syste-27e33",
             storageBucket: "student-management-syste-27e33.appspot.com",
-            messagingSenderId: "536854876751",
+            messagingSenderId: "536854876สาร51",
             appId: "1:536854876751:web:adf88ef74dfc76cea903a",
             measurementId: "G-FKZJL4HLZZ"
         };
@@ -115,7 +115,7 @@
             records.forEach(record => {
                 const recordDiv = document.createElement('div');
                 recordDiv.className = 'p-3 mb-2 bg-gray-50 rounded-lg cursor-pointer hover:bg-orange-100 border border-gray-200';
-                recordDiv.innerHTML = `<h4 class="font-semibold text-gray-800">${record.studentName}</h4><p class="text-sm text-gray-500">Div: ${record.division} | ${new Date(record.timestamp.toDate()).toLocaleString()}</p>`;
+                recordDiv.innerHTML = `<h4 class="font-semibold text-gray-800">${record.name}</h4><p class="text-sm text-gray-500">Div: ${record.division} | ${new Date(record.timestamp.toDate()).toLocaleString()}</p>`;
                 recordDiv.onclick = () => showDetails(record.id);
                 attendanceList.appendChild(recordDiv);
             });
@@ -125,7 +125,7 @@
             const record = allAttendanceRecords.find(r => r.id === recordId);
             if (!record) return;
             
-            document.getElementById('detailName').innerText = record.studentName;
+            document.getElementById('detailName').innerText = record.name;
             document.getElementById('detailPrn').innerText = record.prn || 'N/A';
             document.getElementById('detailDepartment').innerText = record.department || 'N/A';
             document.getElementById('detailClass').innerText = record.class || 'N/A';
@@ -228,7 +228,7 @@
                 const sanitize = (str) => `"${(str || '').toString().replace(/"/g, '""')}"`;
 
                 return [
-                    sanitize(record.studentName),
+                    sanitize(record.name),
                     sanitize(record.prn),
                     sanitize(record.department),
                     sanitize(record.class),
@@ -274,10 +274,10 @@
                 return;
             }
 
-            const relativeURL = 'student_app.html';
+            // **FIX:** Change the relative URL to index.html
+            const relativeURL = 'index.html'; 
             const params = new URLSearchParams({ teacherId: currentTeacher.id, lecture, date });
             
-            // Manually construct the base path to ensure it works correctly even from local files
             const currentPath = window.location.href;
             const basePath = currentPath.substring(0, currentPath.lastIndexOf('/') + 1);
             const fullURL = `${basePath}${relativeURL}?${params.toString()}`;
