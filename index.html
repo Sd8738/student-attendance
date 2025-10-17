@@ -60,8 +60,8 @@
                 console.log("Attendance link detected:", linkParams);
             }
 
-            // Check if student is "logged in" from session storage
-            const loggedInStudent = sessionStorage.getItem('currentStudent');
+            // Check if student is "logged in" from local storage for persistence
+            const loggedInStudent = localStorage.getItem('currentStudent');
             if (loggedInStudent) {
                 currentStudent = JSON.parse(loggedInStudent);
                 showDashboard();
@@ -108,8 +108,11 @@
 
         function logout() {
             currentStudent = null;
-            sessionStorage.removeItem('currentStudent');
-            showLogin();
+            localStorage.removeItem('currentStudent');
+            // Also clear link params on logout
+            linkParams = {};
+            // Go back to the login screen without any URL parameters
+            window.location.href = window.location.pathname;
         }
 
         // --- REGISTRATION ---
@@ -161,7 +164,7 @@
                 document.getElementById('login-error').textContent = 'Invalid PRN or Mobile Number.';
             } else {
                 currentStudent = { id: querySnapshot.docs[0].id, ...querySnapshot.docs[0].data() };
-                sessionStorage.setItem('currentStudent', JSON.stringify(currentStudent));
+                localStorage.setItem('currentStudent', JSON.stringify(currentStudent));
                 showDashboard();
             }
         });
@@ -195,7 +198,7 @@
 
                 const attendanceRecord = {
                     studentId: currentStudent.id,
-                    studentName: currentStudent.name, // FIX: Use correct field name
+                    studentName: currentStudent.name,
                     prn: currentStudent.prn,
                     division: currentStudent.division,
                     department: currentStudent.department,
@@ -203,7 +206,7 @@
                     timestamp: new Date(),
                     location: { lat: latitude, lon: longitude },
                     locationName: locationName,
-                    teacherId: linkParams.teacherId, // FIX: Save teacherId from link
+                    teacherId: linkParams.teacherId,
                     lecture: linkParams.lecture,
                     lectureDate: linkParams.date
                 };
@@ -302,3 +305,4 @@
 
 </body>
 </html>
+
