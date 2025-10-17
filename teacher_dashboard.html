@@ -6,20 +6,10 @@
     <title>Personalized Teacher Dashboard</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <style>
-        /* Toggle Switch Styles */
-        .switch { position: relative; display: inline-block; width: 60px; height: 34px; }
-        .switch input { opacity: 0; width: 0; height: 0; }
-        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 34px; }
-        .slider:before { position: absolute; content: ""; height: 26px; width: 26px; left: 4px; bottom: 4px; background-color: white; transition: .4s; border-radius: 50%; }
-        input:checked + .slider { background-color: #4ade80; }
-        input:focus + .slider { box-shadow: 0 0 1px #4ade80; }
-        input:checked + .slider:before { transform: translateX(26px); }
-    </style>
     <!-- Firebase Libraries -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getFirestore, collection, onSnapshot, query, where, getDocs, doc, updateDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, collection, onSnapshot, query, where, getDocs, doc, updateDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyAOFDLOYDRdSZfwprsvs_ena_3X2D0BHjw",
@@ -38,7 +28,6 @@
         let allTeachers = {}; 
         let attendanceChart = null;
         let currentTeacher = null;
-        let teacherListener = null; // To unsubscribe from the listener on logout
 
         const loginView = document.getElementById('loginView');
         const dashboardView = document.getElementById('dashboardView');
@@ -81,7 +70,6 @@
         }
 
         document.getElementById('logoutButton').addEventListener('click', () => {
-            if (teacherListener) teacherListener(); // Unsubscribe from the real-time listener
             localStorage.removeItem('currentTeacher');
             currentTeacher = null;
             showLogin();
@@ -109,10 +97,31 @@
         function loadPersonalizedData() {
             if (!currentTeacher) return;
             
-            // --- NEW: Display permanent link and listen for status changes ---
-            displayPermanentLink();
-            listenToTeacherStatus();
+            // --- Attendance Control Panel ---
+            const permanentLinkInput = document.getElementById('permanentLink');
+            const relativeURL = 'index.html';
+            const params = new URLSearchParams({ teacherId: currentTeacher.id });
+            const currentPath = window.location.href;
+            const basePath = currentPath.substring(0, currentPath.lastIndexOf('/') + 1);
+            permanentLinkInput.value = `${basePath}${relativeURL}?${params.toString()}`;
 
+            const toggle = document.getElementById('attendanceToggle');
+            const lectureInput = document.getElementById('currentLecture');
+            const dateInput = document.getElementById('currentLectureDate');
+            
+            // Listen for real-time updates to this teacher's document
+            onSnapshot(doc(db, "teachers", currentTeacher.id), (docSnap) => {
+                if (docSnap.exists()) {
+                    const teacherData = docSnap.data();
+                    toggle.checked = teacherData.isAcceptingAttendance;
+                    lectureInput.value = teacherData.currentLecture || '';
+                    dateInput.value = teacherData.currentLectureDate || new Date().toISOString().split('T')[0];
+                    lectureInput.disabled = toggle.checked;
+                    dateInput.disabled = toggle.checked;
+                }
+            });
+            
+            // Fetch departments for the filter dropdown
             onSnapshot(departmentsCollection, (snapshot) => {
                 const departmentFilter = document.getElementById('departmentFilter');
                 departmentFilter.innerHTML = '<option value="all">All Departments</option>';
@@ -125,77 +134,18 @@
                 });
             });
 
+            // Fetch attendance records for this specific teacher
             const q = query(attendanceCollection, where("teacherId", "==", currentTeacher.id));
             onSnapshot(q, (querySnapshot) => {
                 allAttendanceRecords = [];
                 querySnapshot.forEach((doc) => {
                     allAttendanceRecords.push({ id: doc.id, ...doc.data() });
                 });
+                // Manual sort because composite indexes can be complex to set up
                 allAttendanceRecords.sort((a, b) => b.timestamp.toDate() - a.timestamp.toDate());
                 filterRecords();
             });
         }
-
-        // --- NEW: ATTENDANCE CONTROL LOGIC ---
-        function displayPermanentLink() {
-            const relativeURL = 'index.html';
-            const params = new URLSearchParams({ teacherId: currentTeacher.id });
-            const currentPath = window.location.href;
-            const basePath = currentPath.substring(0, currentPath.lastIndexOf('/') + 1);
-            const fullURL = `${basePath}${relativeURL}?${params.toString()}`;
-
-            document.getElementById('permanentLink').value = fullURL;
-        }
-
-        function listenToTeacherStatus() {
-            const teacherRef = doc(db, "teachers", currentTeacher.id);
-            teacherListener = onSnapshot(teacherRef, (docSnap) => {
-                if (docSnap.exists()) {
-                    const teacherData = docSnap.data();
-                    const toggle = document.getElementById('attendanceToggle');
-                    const lectureInput = document.getElementById('currentLecture');
-                    const dateInput = document.getElementById('currentDate');
-
-                    toggle.checked = teacherData.isAcceptingAttendance || false;
-                    lectureInput.value = teacherData.currentLecture || '';
-                    dateInput.value = teacherData.currentLectureDate || new Date().toISOString().split('T')[0];
-
-                    // Disable inputs if attendance is active
-                    lectureInput.disabled = toggle.checked;
-                    dateInput.disabled = toggle.checked;
-                }
-            });
-        }
-
-        document.getElementById('attendanceToggle').addEventListener('change', async (e) => {
-            const isStarting = e.target.checked;
-            const lecture = document.getElementById('currentLecture').value;
-            const date = document.getElementById('currentDate').value;
-            
-            if (isStarting && (!lecture || !date)) {
-                alert("Please provide a lecture number/name and date before starting attendance.");
-                e.target.checked = false; // Revert the toggle
-                return;
-            }
-
-            const teacherRef = doc(db, "teachers", currentTeacher.id);
-            await updateDoc(teacherRef, {
-                isAcceptingAttendance: isStarting,
-                currentLecture: lecture,
-                currentLectureDate: date
-            });
-        });
-
-        document.getElementById('copyLinkButton').addEventListener('click', () => {
-            const linkInput = document.getElementById('permanentLink');
-            linkInput.select();
-            document.execCommand('copy');
-            const copyBtn = document.getElementById('copyLinkButton');
-            copyBtn.textContent = 'Copied!';
-            setTimeout(() => { copyBtn.textContent = 'Copy'; }, 2000);
-        });
-        
-        // --- EXISTING DASHBOARD FUNCTIONS (renderAttendance, showDetails, etc.) ---
         
         function renderAttendance(records) {
             const attendanceList = document.getElementById('attendanceList');
@@ -235,9 +185,29 @@
             
             const teacher = allTeachers[record.teacherId];
             document.getElementById('detailTeacher').innerText = teacher ? `${teacher.name} (${teacher.subject})` : 'Unknown';
+            
+            // NEW: Set up the delete button
+            const deleteBtn = document.getElementById('deleteAttendanceBtn');
+            deleteBtn.onclick = () => deleteAttendance(record.id);
 
             document.getElementById('detailsPlaceholder').classList.add('hidden');
             document.getElementById('studentDetails').classList.remove('hidden');
+        }
+
+        // NEW: Function to delete an attendance record
+        async function deleteAttendance(recordId) {
+            if (confirm('Are you sure you want to permanently delete this attendance record?')) {
+                try {
+                    await deleteDoc(doc(db, "attendance", recordId));
+                    // Hide details view and show placeholder
+                    document.getElementById('detailsPlaceholder').classList.remove('hidden');
+                    document.getElementById('studentDetails').classList.add('hidden');
+                    alert('Attendance record deleted successfully.');
+                } catch (error) {
+                    console.error("Error deleting attendance: ", error);
+                    alert('Failed to delete the record. Please try again.');
+                }
+            }
         }
 
         function updateAnalytics(records) {
@@ -294,13 +264,12 @@
         
         window.filterRecords = filterRecords;
 
-        const exportButton = document.getElementById('exportButton');
-        exportButton.addEventListener('click', () => {
+        // --- EXPORT TO CSV FUNCTIONALITY ---
+        document.getElementById('exportButton').addEventListener('click', () => {
+            let recordsToExport = allAttendanceRecords;
             const selectedDivision = document.getElementById('divisionFilter').value;
             const selectedDepartment = document.getElementById('departmentFilter').value;
             const selectedClass = document.getElementById('classFilter').value;
-            
-            let recordsToExport = allAttendanceRecords;
 
             if (selectedDivision !== 'all') recordsToExport = recordsToExport.filter(r => r.division === selectedDivision);
             if (selectedDepartment !== 'all') recordsToExport = recordsToExport.filter(r => r.department === selectedDepartment);
@@ -337,7 +306,46 @@
             document.body.removeChild(link);
         });
 
+        // --- ATTENDANCE CONTROL LOGIC ---
+        document.getElementById('attendanceToggle').addEventListener('change', async (e) => {
+            const isChecked = e.target.checked;
+            const lecture = document.getElementById('currentLecture').value;
+            const date = document.getElementById('currentLectureDate').value;
+
+            if (isChecked && (!lecture || !date)) {
+                alert('Please enter a lecture number and date before starting.');
+                e.target.checked = false;
+                return;
+            }
+            
+            const teacherRef = doc(db, "teachers", currentTeacher.id);
+            await updateDoc(teacherRef, {
+                isAcceptingAttendance: isChecked,
+                currentLecture: isChecked ? lecture : '',
+                currentLectureDate: isChecked ? date : ''
+            });
+        });
+        
+        document.getElementById('copyLinkButton').addEventListener('click', () => {
+            const linkInput = document.getElementById('permanentLink');
+            linkInput.select();
+            document.execCommand('copy');
+            const btn = document.getElementById('copyLinkButton');
+            btn.textContent = 'Copied!';
+            setTimeout(() => { btn.textContent = 'Copy'; }, 2000);
+        });
+
     </script>
+     <style>
+        /* Custom styles for the toggle switch */
+        .toggle-checkbox:checked {
+            right: 0;
+            border-color: #F97316;
+        }
+        .toggle-checkbox:checked + .toggle-label {
+            background-color: #F97316;
+        }
+    </style>
 </head>
 <body class="bg-gray-100 font-sans">
 
@@ -372,8 +380,8 @@
             </div>
         </div>
         
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
-             <div>
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+             <div class="md:col-span-1">
                 <label for="divisionFilter" class="block text-sm font-medium text-gray-700 mb-1">Filter by Division:</label>
                 <select id="divisionFilter" onchange="filterRecords()" class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500">
                     <option value="all">All Divisions</option>
@@ -382,13 +390,13 @@
                     <option value="C">Division C</option>
                 </select>
             </div>
-            <div>
+            <div class="md:col-span-1">
                 <label for="departmentFilter" class="block text-sm font-medium text-gray-700 mb-1">Filter by Department:</label>
                 <select id="departmentFilter" onchange="filterRecords()" class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500">
                     <option value="all">All Departments</option>
                 </select>
             </div>
-             <div>
+             <div class="md:col-span-1">
                 <label for="classFilter" class="block text-sm font-medium text-gray-700 mb-1">Filter by Class:</label>
                 <select id="classFilter" onchange="filterRecords()" class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500">
                     <option value="all">All Classes</option>
@@ -398,12 +406,17 @@
                     <option value="BTech">BTech</option>
                 </select>
             </div>
+             <div class="md:col-span-1 text-center self-end">
+                <button id="exportButton" class="w-full bg-green-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-green-700">
+                    Export Filtered Data
+                </button>
+            </div>
         </div>
 
         <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
             <div class="md:col-span-1 bg-white rounded-2xl shadow-lg p-6">
                 <h2 class="text-2xl font-bold text-gray-800 mb-4 border-b pb-2">Your Attendance Log</h2>
-                <div id="attendanceList" class="max-h-96 overflow-y-auto">
+                <div id="attendanceList" class="max-h-[30rem] overflow-y-auto">
                     <p class="text-gray-500">Loading records...</p>
                 </div>
             </div>
@@ -424,36 +437,37 @@
                      <p><strong>Location:</strong> <span id="detailLocation"></span></p>
                      <p><strong>Lecture:</strong> <span id="detailLecture"></span></p>
                      <p><strong>Lecture Date:</strong> <span id="detailLectureDate"></span></p>
+                     <!-- NEW: Delete button -->
+                     <button id="deleteAttendanceBtn" class="!mt-6 w-full bg-red-500 text-white font-bold py-2 px-4 rounded-lg hover:bg-red-600">Delete This Attendance Record</button>
                  </div>
             </div>
         </div>
 
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mt-8">
-            <!-- NEW: Attendance Control Panel -->
             <div class="bg-white rounded-2xl shadow-lg p-6">
                 <h2 class="text-2xl font-bold text-gray-800 mb-4 border-b pb-2">Attendance Control</h2>
-                <div class="space-y-4">
-                    <div>
+                 <div class="space-y-4">
+                     <div>
                         <label class="block text-sm font-medium text-gray-700">Your Permanent Link</label>
-                        <div class="flex">
-                            <input type="text" id="permanentLink" readonly class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-l-md bg-gray-100">
-                            <button id="copyLinkButton" class="bg-gray-500 text-white font-bold py-2 px-4 rounded-r-lg hover:bg-gray-600">Copy</button>
-                        </div>
+                         <div class="flex mt-1">
+                             <input type="text" id="permanentLink" readonly class="block w-full px-3 py-2 border border-gray-300 rounded-l-md bg-gray-100">
+                             <button id="copyLinkButton" class="bg-gray-500 text-white font-bold py-2 px-4 rounded-r-lg hover:bg-gray-600">Copy</button>
+                         </div>
                     </div>
-                    <div class="border-t pt-4">
-                        <label for="currentLecture" class="block text-sm font-medium text-gray-700">Set Current Lecture Number/Name</label>
+                    <div>
+                        <label for="currentLecture" class="block text-sm font-medium text-gray-700">Current Lecture Number/Name</label>
                         <input type="text" id="currentLecture" placeholder="e.g., 1, 2, Practical 3" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-orange-500 focus:border-orange-500 disabled:bg-gray-200">
                     </div>
-                    <div>
-                        <label for="currentDate" class="block text-sm font-medium text-gray-700">Set Current Lecture Date</label>
-                        <input type="date" id="currentDate" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-orange-500 focus:border-orange-500 disabled:bg-gray-200">
+                     <div>
+                        <label for="currentLectureDate" class="block text-sm font-medium text-gray-700">Current Lecture Date</label>
+                        <input type="date" id="currentLectureDate" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-orange-500 focus:border-orange-500 disabled:bg-gray-200">
                     </div>
-                    <div class="flex items-center justify-between pt-2">
-                        <span class="text-lg font-semibold text-gray-700">Accepting Attendance</span>
-                        <label class="switch">
-                            <input type="checkbox" id="attendanceToggle">
-                            <span class="slider"></span>
-                        </label>
+                    <div class="flex items-center justify-between">
+                         <span class="text-lg font-medium text-gray-900">Accepting Attendance</span>
+                        <div class="relative inline-block w-14 mr-2 align-middle select-none transition duration-200 ease-in">
+                            <input type="checkbox" name="toggle" id="attendanceToggle" class="toggle-checkbox absolute block w-7 h-7 rounded-full bg-white border-4 appearance-none cursor-pointer"/>
+                            <label for="attendanceToggle" class="toggle-label block overflow-hidden h-7 rounded-full bg-gray-300 cursor-pointer"></label>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -461,11 +475,6 @@
                 <h2 class="text-2xl font-bold text-gray-800 mb-4 border-b pb-2">Your Attendance Analytics</h2>
                 <canvas id="attendanceChart"></canvas>
             </div>
-        </div>
-         <div class="mt-6 text-center">
-            <button id="exportButton" class="bg-green-600 text-white font-bold py-3 px-8 rounded-lg hover:bg-green-700">
-                Export Filtered Data to CSV
-            </button>
         </div>
     </div>
 </body>
