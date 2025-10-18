@@ -1,6 +1,11 @@
 {
-  "short_name": "Attendance App",
   "name": "Student Attendance System",
+  "short_name": "Attendance",
+  "start_url": "/index.html",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#23a6d5",
+  "orientation": "portrait-primary",
   "icons": [
     {
       "src": "images/icon-192x192.png",
@@ -12,10 +17,5 @@
       "type": "image/png",
       "sizes": "512x512"
     }
-  ],
-  "start_url": "student_app.html",
-  "display": "standalone",
-  "theme_color": "#f97316",
-  "background_color": "#ffffff"
+  ]
 }
-
