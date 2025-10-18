@@ -4,17 +4,17 @@ A **web-based attendance management system** designed to eliminate proxy attenda
 
 ---
 Student Dashboard (Login / Register): 
-https://i.postimg.cc/k48CKqgK/Screenshot-73.png
-https://i.postimg.cc/vTQKTsg8/Screenshot-74.png
+![image](https://i.postimg.cc/k48CKqgK/Screenshot-73.png)
+![image](https://i.postimg.cc/vTQKTsg8/Screenshot-74.png)
 
 Teacher Dashboard (Login / Dashboard):
-https://i.postimg.cc/k5GWyMzB/Screenshot-75.png
-https://i.postimg.cc/HsTc2s8R/Screenshot-76.png
+![image](https://i.postimg.cc/k5GWyMzB/Screenshot-75.png)
+![image](https://i.postimg.cc/HsTc2s8R/Screenshot-76.png)
 
 Hod Dashboard (Dashboard):
-https://i.postimg.cc/J72v3tFt/Screenshot-77.png
-https://i.postimg.cc/D09x94kT/Screenshot-78.png
-https://i.postimg.cc/ydk4BRGp/Screenshot-79.png
+![image](https://i.postimg.cc/J72v3tFt/Screenshot-77.png)
+![image](https://i.postimg.cc/D09x94kT/Screenshot-78.png)
+![image](https://i.postimg.cc/ydk4BRGp/Screenshot-79.png)
 
 
 ## 🚀 Features
